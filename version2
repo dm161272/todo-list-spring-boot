@@ -1,0 +1,447 @@
+Sure! Below is a more advanced version of the Todo List REST API with additional features like validation, error handling, DTOs (Data Transfer Objects), and using Spring Boot annotations.
+
+### 1. Project Setup
+
+#### Build File (`build.gradle`)
+
+```groovy
+plugins {
+    id 'org.springframework.boot' version '3.0.0'
+    id 'io.spring.dependency-management' version '1.0.13.RELEASE'
+    id 'java'
+}
+
+group = 'com.example'
+version = '1.0.0'
+sourceCompatibility = '17'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    runtimeOnly 'org.postgresql:postgresql'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+test {
+    useJUnitPlatform()
+}
+```
+
+### 2. Configure Application Properties
+
+Create an `application.properties` file in the `src/main/resources` directory:
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/tododb
+spring.datasource.username=your_db_username
+spring.datasource.password=your_db_password
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+```
+
+### 3. Create the Todo Entity
+
+#### `Todo.java`
+
+```java
+package com.example.demo.entity;
+
+import javax.persistence.*;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
+
+@Entity
+@Table(name = "todos")
+public class Todo {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @NotBlank(message = "Title is mandatory")
+    @Size(max = 100, message = "Title cannot be longer than 100 characters")
+    @Column(nullable = false)
+    private String title;
+
+    @NotBlank(message = "Description is mandatory")
+    @Size(max = 250, message = "Description cannot be longer than 250 characters")
+    @Column(nullable = false)
+    private String description;
+
+    @Column(nullable = false)
+    private boolean completed;
+
+    // Getters and Setters
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public boolean isCompleted() {
+        return completed;
+    }
+
+    public void setCompleted(boolean completed) {
+        this.completed = completed;
+    }
+}
+```
+
+### 4. Create the Todo Repository
+
+#### `TodoRepository.java`
+
+```java
+package com.example.demo.repository;
+
+import com.example.demo.entity.Todo;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface TodoRepository extends JpaRepository<Todo, Long> {
+}
+```
+
+### 5. Create DTOs
+
+#### `TodoDTO.java`
+
+```java
+package com.example.demo.dto;
+
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
+
+public class TodoDTO {
+
+    @NotBlank(message = "Title is mandatory")
+    @Size(max = 100, message = "Title cannot be longer than 100 characters")
+    private String title;
+
+    @NotBlank(message = "Description is mandatory")
+    @Size(max = 250, message = "Description cannot be longer than 250 characters")
+    private String description;
+
+    private boolean completed;
+
+    // Getters and Setters
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public boolean isCompleted() {
+        return completed;
+    }
+
+    public void setCompleted(boolean completed) {
+        this.completed = completed;
+    }
+}
+```
+
+#### `TodoResponseDTO.java`
+
+```java
+package com.example.demo.dto;
+
+public class TodoResponseDTO {
+
+    private Long id;
+    private String title;
+    private String description;
+    private boolean completed;
+
+    // Getters and Setters
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public boolean isCompleted() {
+        return completed;
+    }
+
+    public void setCompleted(boolean completed) {
+        this.completed = completed;
+    }
+}
+```
+
+### 6. Create the Todo Service
+
+#### `TodoService.java`
+
+```java
+package com.example.demo.service;
+
+import com.example.demo.dto.TodoDTO;
+import com.example.demo.dto.TodoResponseDTO;
+import com.example.demo.entity.Todo;
+import com.example.demo.repository.TodoRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class TodoService {
+
+    @Autowired
+    private TodoRepository todoRepository;
+
+    public List<TodoResponseDTO> getAllTodos() {
+        return todoRepository.findAll().stream().map(this::convertToDto).collect(Collectors.toList());
+    }
+
+    public TodoResponseDTO getTodoById(Long id) {
+        Todo todo = todoRepository.findById(id).orElseThrow(() -> new RuntimeException("Todo not found"));
+        return convertToDto(todo);
+    }
+
+    public TodoResponseDTO createTodo(TodoDTO todoDTO) {
+        Todo todo = new Todo();
+        todo.setTitle(todoDTO.getTitle());
+        todo.setDescription(todoDTO.getDescription());
+        todo.setCompleted(todoDTO.isCompleted());
+        return convertToDto(todoRepository.save(todo));
+    }
+
+    public TodoResponseDTO updateTodo(Long id, TodoDTO todoDTO) {
+        Todo existingTodo = todoRepository.findById(id).orElseThrow(() -> new RuntimeException("Todo not found"));
+        existingTodo.setTitle(todoDTO.getTitle());
+        existingTodo.setDescription(todoDTO.getDescription());
+        existingTodo.setCompleted(todoDTO.isCompleted());
+        return convertToDto(todoRepository.save(existingTodo));
+    }
+
+    public void deleteTodo(Long id) {
+        todoRepository.deleteById(id);
+    }
+
+    private TodoResponseDTO convertToDto(Todo todo) {
+        TodoResponseDTO todoResponseDTO = new TodoResponseDTO();
+        todoResponseDTO.setId(todo.getId());
+        todoResponseDTO.setTitle(todo.getTitle());
+        todoResponseDTO.setDescription(todo.getDescription());
+        todoResponseDTO.setCompleted(todo.isCompleted());
+        return todoResponseDTO;
+    }
+}
+```
+
+### 7. Create the Todo Controller
+
+#### `TodoController.java`
+
+```java
+package com.example.demo.controller;
+
+import com.example.demo.dto.TodoDTO;
+import com.example.demo.dto.TodoResponseDTO;
+import com.example.demo.service.TodoService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import javax.validation.Valid;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/todos")
+public class TodoController {
+
+    @Autowired
+    private TodoService todoService;
+
+    @GetMapping
+    public ResponseEntity<List<TodoResponseDTO>> getAllTodos() {
+        return ResponseEntity.ok(todoService.getAllTodos());
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<TodoResponseDTO> getTodoById(@PathVariable Long id) {
+        return ResponseEntity.ok(todoService.getTodoById(id));
+    }
+
+    @PostMapping
+    public ResponseEntity<TodoResponseDTO> createTodo(@Valid @RequestBody TodoDTO todoDTO) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(todoService.createTodo(todoDTO));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<TodoResponseDTO> updateTodo(@PathVariable Long id, @Valid @RequestBody TodoDTO todoDTO) {
+        return ResponseEntity.ok(todoService.updateTodo(id, todoDTO));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteTodo(@PathVariable Long id) {
+        todoService.deleteTodo(id);
+        return ResponseEntity.noContent().build();
+    }
+}
+```
+
+### 8. Error Handling
+
+#### `GlobalExceptionHandler.java`
+
+```java
+package com.example.demo.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@ControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
+        Map<String, String> errors = new HashMap<>();
+        ex.getBindingResult().getAllErrors().forEach((error) -> {
+            String fieldName = ((FieldError) error).getField();
+            String errorMessage = error.getDefaultMessage();
+            errors.put(fieldName, errorMessage);
+        });
+        return ResponseEntity.badRequest().body(errors);
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    @Exception
+
+Handler(RuntimeException.class)
+    public ResponseEntity<String> handleRuntimeExceptions(RuntimeException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+    }
+}
+```
+
+### 9. Create the Application Class
+
+#### `DemoApplication.java`
+
+```java
+package com.example.demo;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class DemoApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(DemoApplication.class, args);
+    }
+}
+```
+
+### 10. Run the Application
+
+Ensure PostgreSQL is running and accessible with the database `tododb` created. You can then run the Spring Boot application using the following command:
+
+```sh
+./gradlew bootRun
+```
+
+### Testing the API
+
+You can test the API using tools like Postman or cURL. Here are some example requests:
+
+- **Create a Todo**
+
+  ```sh
+  curl -X POST "http://localhost:8080/api/todos" -H "Content-Type: application/json" -d '{"title":"Sample Todo", "description":"This is a sample todo", "completed":false}'
+  ```
+
+- **Get All Todos**
+
+  ```sh
+  curl -X GET "http://localhost:8080/api/todos"
+  ```
+
+- **Get Todo by ID**
+
+  ```sh
+  curl -X GET "http://localhost:8080/api/todos/1"
+  ```
+
+- **Update Todo**
+
+  ```sh
+  curl -X PUT "http://localhost:8080/api/todos/1" -H "Content-Type: application/json" -d '{"title":"Updated Todo", "description":"This is an updated todo", "completed":true}'
+  ```
+
+- **Delete Todo**
+
+  ```sh
+  curl -X DELETE "http://localhost:8080/api/todos/1"
+  ```
+
+This completes the setup of a more advanced Todo REST API using Spring Boot, Hibernate, PostgreSQL, and Gradle with Java. This version includes validation, error handling, DTOs, and proper use of Spring Boot annotations.
