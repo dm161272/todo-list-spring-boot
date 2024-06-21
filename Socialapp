@@ -1,0 +1,127 @@
+2. Configuring the ApplicationAdd the PostgreSQL database configuration in application.properties:spring.datasource.url=jdbc:postgresql://localhost:5432/socialmedia
+spring.datasource.username=your_username
+spring.datasource.password=your_password
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect3. Creating the Entity ClassesUser Entity@Entity
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String username;
+    private String password;
+    
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "user_followers",
+               joinColumns = @JoinColumn(name = "user_id"),
+               inverseJoinColumns = @JoinColumn(name = "follower_id"))
+    private Set<User> followers = new HashSet<>();
+
+    // Getters and Setters
+}Post Entity@Entity
+public class Post {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String title;
+    private String body;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "author_id")
+    private User author;
+
+    @ManyToMany
+    @JoinTable(name = "post_likes",
+               joinColumns = @JoinColumn(name = "post_id"),
+               inverseJoinColumns = @JoinColumn(name = "user_id"))
+    private Set<User> likedBy = new HashSet<>();
+
+    // Getters and Setters
+}4. Creating Repositoriespublic interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByUsername(String username);
+}
+
+public interface PostRepository extends JpaRepository<Post, Long> {
+    List<Post> findByAuthor(User author);
+}5. Creating ServicesUserService@Service
+public class UserService {
+    @Autowired
+    private UserRepository userRepository;
+
+    public User createUser(User user) {
+        return userRepository.save(user);
+    }
+
+    public Optional<User> findByUsername(String username) {
+        return userRepository.findByUsername(username);
+    }
+
+    public void followUser(Long userId, Long followId) {
+        User user = userRepository.findById(userId).orElseThrow();
+        User follow = userRepository.findById(followId).orElseThrow();
+        user.getFollowers().add(follow);
+        userRepository.save(user);
+    }
+}PostService@Service
+public class PostService {
+    @Autowired
+    private PostRepository postRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    public Post createPost(Post post, Long authorId) {
+        User author = userRepository.findById(authorId).orElseThrow();
+        post.setAuthor(author);
+        return postRepository.save(post);
+    }
+
+    public List<Post> getPostsByAuthor(Long authorId) {
+        User author = userRepository.findById(authorId).orElseThrow();
+        return postRepository.findByAuthor(author);
+    }
+
+    public void likePost(Long postId, Long userId) {
+        Post post = postRepository.findById(postId).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        post.getLikedBy().add(user);
+        postRepository.save(post);
+    }
+}6. Creating ControllersUserController@RestController
+@RequestMapping("/users")
+public class UserController {
+    @Autowired
+    private UserService userService;
+
+    @PostMapping
+    public ResponseEntity<User> createUser(@RequestBody User user) {
+        return ResponseEntity.ok(userService.createUser(user));
+    }
+
+    @PostMapping("/{userId}/follow/{followId}")
+    public ResponseEntity<?> followUser(@PathVariable Long userId, @PathVariable Long followId) {
+        userService.followUser(userId, followId);
+        return ResponseEntity.ok().build();
+    }
+}PostController@RestController
+@RequestMapping("/posts")
+public class PostController {
+    @Autowired
+    private PostService postService;
+
+    @PostMapping
+    public ResponseEntity<Post> createPost(@RequestBody Post post, @RequestParam Long authorId) {
+        return ResponseEntity.ok(postService.createPost(post, authorId));
+    }
+
+    @GetMapping("/author/{authorId}")
+    public ResponseEntity<List<Post>> getPostsByAuthor(@PathVariable Long authorId) {
+        return ResponseEntity.ok(postService.getPostsByAuthor(authorId));
+    }
+
+    @PostMapping("/{postId}/like")
+    public ResponseEntity<?> likePost(@PathVariable Long postId, @RequestParam Long userId) {
+        postService.likePost(postId, userId);
+        return ResponseEntity.ok().build();
+    }
+}7. Running the Application
