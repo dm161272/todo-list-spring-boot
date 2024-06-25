@@ -1,0 +1,197 @@
+If the data from the API provider comes in the form of a JSON array, you'll need to adjust your service class to handle the array structure. We'll update the `WeatherApiResponse` class and modify the `WeatherService` class to parse the JSON array correctly.
+
+### Step 1: Update the WeatherApiResponse Class
+
+Assuming the API returns a JSON array of weather objects, we'll need to adjust our model class to handle an array response. For simplicity, let's assume each element in the array contains weather data for a city.
+
+```java
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import lombok.Data;
+
+import java.util.List;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+@Data
+public class WeatherApiResponse {
+    private List<WeatherData> weatherDataList;
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @Data
+    public static class WeatherData {
+        private Location location;
+        private Current current;
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        @Data
+        public static class Location {
+            private String name;
+        }
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        @Data
+        public static class Current {
+            private double tempC;
+            private Condition condition;
+
+            @JsonIgnoreProperties(ignoreUnknown = true)
+            @Data
+            public static class Condition {
+                private String text;
+            }
+        }
+    }
+}
+```
+
+### Step 2: Modify the Service Class to Handle JSON Arrays
+
+Update the `WeatherService` class to correctly parse the JSON array and store the data in the database.
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.Optional;
+
+@Service
+public class WeatherService {
+
+    @Value("${weather.api.url}")
+    private String apiUrl;
+
+    @Value("${weather.api.key}")
+    private String apiKey;
+
+    private final WeatherRepository weatherRepository;
+    private final RestTemplate restTemplate;
+
+    public WeatherService(WeatherRepository weatherRepository, RestTemplate restTemplate) {
+        this.weatherRepository = weatherRepository;
+        this.restTemplate = restTemplate;
+    }
+
+    @Cacheable("weather")
+    public Optional<WeatherDTO> getWeatherByCity(String city) {
+        return weatherRepository.findByCity(city)
+                .map(this::convertToDTO)
+                .or(() -> fetchAndSaveWeather(city, null));
+    }
+
+    @Cacheable("weather")
+    public Optional<WeatherDTO> getWeatherByZipCode(String zipCode) {
+        return weatherRepository.findByZipCode(zipCode)
+                .map(this::convertToDTO)
+                .or(() -> fetchAndSaveWeather(null, zipCode));
+    }
+
+    private Optional<WeatherDTO> fetchAndSaveWeather(String city, String zipCode) {
+        String query = city != null ? city : zipCode;
+        String url = String.format("%s?key=%s&q=%s", apiUrl, apiKey, query);
+
+        try {
+            WeatherApiResponse response = restTemplate.getForObject(url, WeatherApiResponse.class);
+            if (response != null && !response.getWeatherDataList().isEmpty()) {
+                WeatherApiResponse.WeatherData weatherData = response.getWeatherDataList().get(0);
+                Weather weather = new Weather();
+                weather.setCity(weatherData.getLocation().getName());
+                weather.setZipCode(zipCode);
+                weather.setTemperature(weatherData.getCurrent().getTempC() + "°C");
+                weather.setDescription(weatherData.getCurrent().getCondition().getText());
+                weatherRepository.save(weather);
+                return Optional.of(convertToDTO(weather));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return Optional.empty();
+    }
+
+    private WeatherDTO convertToDTO(Weather weather) {
+        return new WeatherDTO(
+                weather.getCity(),
+                weather.getZipCode(),
+                weather.getTemperature(),
+                weather.getDescription()
+        );
+    }
+
+    @Scheduled(fixedRate = 3600000)  // 1 hour in milliseconds
+    public void refreshWeatherData() {
+        for (Weather weather : weatherRepository.findAll()) {
+            fetchAndSaveWeather(weather.getCity(), weather.getZipCode());
+        }
+    }
+}
+```
+
+### Step 3: Ensure the Controller Works Correctly
+
+Ensure the controller is set up to call the service methods correctly:
+
+```java
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Optional;
+
+@RestController
+public class WeatherController {
+
+    private final WeatherService weatherService;
+
+    public WeatherController(WeatherService weatherService) {
+        this.weatherService = weatherService;
+    }
+
+    @GetMapping("/weather")
+    public ResponseEntity<WeatherDTO> getWeather(@RequestParam(required = false) String city, @RequestParam(required = false) String zipCode) {
+        Optional<WeatherDTO> weatherDTO = (city != null) ? weatherService.getWeatherByCity(city) : weatherService.getWeatherByZipCode(zipCode);
+
+        return weatherDTO.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
+    }
+}
+```
+
+### Step 4: Enable Scheduling and Caching
+
+Ensure your main application class is configured to enable scheduling and caching:
+
+```java
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+@SpringBootApplication
+@EnableScheduling
+@EnableCaching
+public class WeatherApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(WeatherApplication.class, args);
+    }
+}
+```
+
+### Step 5: Test Your Application
+
+Run your application and test the endpoints using tools like Postman or curl.
+
+```sh
+curl -X GET "http://localhost:8080/weather?city=London"
+curl -X GET "http://localhost:8080/weather?zipCode=10001"
+```
+
+### Additional Enhancements
+
+1. **Error Handling**: Implement robust error handling for different failure scenarios, such as network errors, API rate limits, and invalid responses.
+2. **Security**: Use Spring Security to secure your endpoints.
+3. **Logging**: Use a logging framework like SLF4J with Logback or Log4j2 to log important events and errors.
+4. **Configuration Management**: Use Spring Cloud Config or a similar tool for managing external configurations.
+
+This setup provides a comprehensive and advanced Spring Boot application to retrieve, persist, and periodically refresh weather data from a third-party API, handling JSON arrays efficiently.
