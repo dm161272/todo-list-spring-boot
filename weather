@@ -1,0 +1,227 @@
+Sure, I'll guide you through creating a Spring Boot application that integrates with a third-party API to retrieve weather data, allows users to search for weather data by zip code or city name, and uses Hibernate to persist weather data to a local database. Additionally, we'll use Spring Scheduler to periodically refresh the weather data.
+
+### Step 1: Create a Spring Boot Application
+
+Start by creating a new Spring Boot application using Spring Initializr or your preferred method. Include the following dependencies:
+
+- Spring Web
+- Spring Data JPA
+- H2 Database (for local development)
+- Spring Boot DevTools
+- Spring Boot Actuator (optional, for monitoring)
+- Spring Scheduler
+- Lombok (optional, for reducing boilerplate code)
+
+### Step 2: Set Up Your Application Properties
+
+Configure your `application.properties` file with necessary details such as the database configuration and API details. Here is an example:
+
+```properties
+# Database configuration
+spring.datasource.url=jdbc:h2:mem:testdb
+spring.datasource.driverClassName=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=password
+spring.jpa.database-platform=org.hibernate.dialect.H2Dialect
+spring.h2.console.enabled=true
+
+# Third-party API configuration
+weather.api.url=http://api.weatherapi.com/v1/current.json
+weather.api.key=YOUR_API_KEY
+```
+
+### Step 3: Create Entity Classes
+
+Define entity classes to map the weather data. For example:
+
+```java
+import javax.persistence.Entity;
+import javax.persistence.GeneratedValue;
+import javax.persistence.GenerationType;
+import javax.persistence.Id;
+
+@Entity
+public class Weather {
+    @Id
+    @GeneratedValue(strategy = GenerationType.AUTO)
+    private Long id;
+
+    private String city;
+    private String zipCode;
+    private String temperature;
+    private String description;
+
+    // Getters and Setters
+}
+```
+
+### Step 4: Create Repository Interface
+
+Create a repository interface for the `Weather` entity:
+
+```java
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface WeatherRepository extends JpaRepository<Weather, Long> {
+    Weather findByCity(String city);
+    Weather findByZipCode(String zipCode);
+}
+```
+
+### Step 5: Create Service Class to Handle Business Logic
+
+Create a service class to interact with the third-party API and handle the business logic:
+
+```java
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+@Service
+public class WeatherService {
+
+    @Value("${weather.api.url}")
+    private String apiUrl;
+
+    @Value("${weather.api.key}")
+    private String apiKey;
+
+    private final WeatherRepository weatherRepository;
+    private final RestTemplate restTemplate;
+
+    public WeatherService(WeatherRepository weatherRepository, RestTemplate restTemplate) {
+        this.weatherRepository = weatherRepository;
+        this.restTemplate = restTemplate;
+    }
+
+    public Weather getWeatherByCity(String city) {
+        Weather weather = weatherRepository.findByCity(city);
+        if (weather == null) {
+            weather = fetchWeatherFromApi(city, null);
+            if (weather != null) {
+                weatherRepository.save(weather);
+            }
+        }
+        return weather;
+    }
+
+    public Weather getWeatherByZipCode(String zipCode) {
+        Weather weather = weatherRepository.findByZipCode(zipCode);
+        if (weather == null) {
+            weather = fetchWeatherFromApi(null, zipCode);
+            if (weather != null) {
+                weatherRepository.save(weather);
+            }
+        }
+        return weather;
+    }
+
+    private Weather fetchWeatherFromApi(String city, String zipCode) {
+        String url = String.format("%s?key=%s&q=%s", apiUrl, apiKey, city != null ? city : zipCode);
+        WeatherApiResponse response = restTemplate.getForObject(url, WeatherApiResponse.class);
+
+        if (response != null) {
+            Weather weather = new Weather();
+            weather.setCity(response.getLocation().getName());
+            weather.setZipCode(zipCode);
+            weather.setTemperature(response.getCurrent().getTempC() + "°C");
+            weather.setDescription(response.getCurrent().getCondition().getText());
+            return weather;
+        }
+        return null;
+    }
+
+    @Scheduled(fixedRate = 3600000)  // 1 hour in milliseconds
+    public void refreshWeatherData() {
+        for (Weather weather : weatherRepository.findAll()) {
+            Weather updatedWeather = fetchWeatherFromApi(weather.getCity(), weather.getZipCode());
+            if (updatedWeather != null) {
+                weather.setTemperature(updatedWeather.getTemperature());
+                weather.setDescription(updatedWeather.getDescription());
+                weatherRepository.save(weather);
+            }
+        }
+    }
+}
+```
+
+### Step 6: Create a Controller Class
+
+Create a controller class to handle HTTP requests:
+
+```java
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class WeatherController {
+
+    private final WeatherService weatherService;
+
+    public WeatherController(WeatherService weatherService) {
+        this.weatherService = weatherService;
+    }
+
+    @GetMapping("/weather")
+    public Weather getWeather(@RequestParam(required = false) String city, @RequestParam(required = false) String zipCode) {
+        if (city != null) {
+            return weatherService.getWeatherByCity(city);
+        } else if (zipCode != null) {
+            return weatherService.getWeatherByZipCode(zipCode);
+        }
+        return null;
+    }
+}
+```
+
+### Step 7: Define a Model for the API Response
+
+Define a model class to map the third-party API response:
+
+```java
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class WeatherApiResponse {
+    private Location location;
+    private Current current;
+
+    // Getters and Setters
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Location {
+        private String name;
+
+        // Getters and Setters
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Current {
+        private double tempC;
+        private Condition condition;
+
+        // Getters and Setters
+
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        public static class Condition {
+            private String text;
+
+            // Getters and Setters
+        }
+    }
+}
+```
+
+### Step 8: Run the Application
+
+Run the Spring Boot application and test it by accessing the endpoint `/weather?city={city_name}` or `/weather?zipCode={zip_code}`.
+
+### Additional Considerations
+
+1. **Error Handling**: Add proper error handling for API calls and database operations.
+2. **Security**: Secure your API endpoints using Spring Security if necessary.
+3. **Testing**: Write unit tests and integration tests for your application.
+
+This setup provides a basic structure to get started. Depending on your requirements, you might need to expand or customize it further.
